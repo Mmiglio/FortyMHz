@@ -1,30 +1,36 @@
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions.{greatest, lit, min, when}
-import org.apache.spark.streaming.{Milliseconds, StreamingContext}
+import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 
 object Application {
   def main(args: Array[String]): Unit = {
+
+    val windowTime = args(0).toInt
+
     val nHits = 128 //number of hits per message
+    val topicIn = Array("test80")
+    val topicOut = Array("events")
 
-    // Create streaming context
-    val conf = new SparkConf().setAppName("DAQStream")
-    val ssc = new StreamingContext(conf, Milliseconds(5000))
-    ssc.sparkContext.setLogLevel("ERROR")
-
-    // Create a direct stream
     val consumerConfig = Map[String, Object](
       "bootstrap.servers" -> "10.64.22.40:9092,10.64.22.41:9092,10.64.22.42:9092",
       "key.deserializer" -> "org.apache.kafka.common.serialization.ByteArrayDeserializer",
       "value.deserializer" -> "org.apache.kafka.common.serialization.ByteArrayDeserializer",
       "group.id" -> "40"
     )
+
+    // Create streaming context
+    val conf = new SparkConf().setAppName("DAQStream")
+    val ssc = new StreamingContext(conf, Seconds(windowTime))
+    ssc.sparkContext.setLogLevel("ERROR")
+
+    // Create a direct stream
     val stream = KafkaUtils.createDirectStream[Array[Byte], Array[Byte]](
       ssc,
       LocationStrategies.PreferConsistent,
       ConsumerStrategies.Subscribe[Array[Byte], Array[Byte]](
-        Array("test80"),
+        topicIn,
         consumerConfig
       )
     ).map(x => x.value())
@@ -40,8 +46,9 @@ object Application {
         // create df
         val df = rdd.toDF("records")
 
-        //unpack df
+        //unpack df and remove non-physical hits
         val unpackedDataframe = Unpacker.unpack(df, nHits)
+          .where($"TDC_CHANNEL"=!=139)
 
         val allhits = unpackedDataframe.filter("HEAD == 1").drop("TRG_QUALITY")
         val triggershits = unpackedDataframe.filter("HEAD > 2")
@@ -82,7 +89,10 @@ object Application {
             $"X_POSSHIFT")*XCELL + XCELL/2 + greatest($"TDRIFT", lit(0))*VDRIFT
           )
 
+        // show events
         events.select("ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT").show(10)
+
+        // to do: create json with columns and write to kafka
 
       }
 

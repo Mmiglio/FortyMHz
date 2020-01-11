@@ -1,4 +1,4 @@
-name := "FourtyMHz_211"
+name := "FortyMHz"
 
 version := "0.1"
 
