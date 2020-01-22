@@ -64,6 +64,7 @@ object Application {
 
         val NCHANNELS = 64
         val XCELL = 42.0
+        val ZCELL = 13.
         val TDRIFT = 15.6*25.0
         val VDRIFT = XCELL*0.5 / TDRIFT
 
@@ -88,6 +89,13 @@ object Application {
           .withColumn("X_POS_RIGHT", ((($"TDC_CHANNEL_NORM"-0.5)/4).cast("integer") +
             $"X_POSSHIFT")*XCELL + XCELL/2 + greatest($"TDRIFT", lit(0))*VDRIFT
           )
+            .withColumn("Z_POS",
+              when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
+                .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
+                .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
+                .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
+                .otherwise(0.0)
+            )
 
         // show events
         events.select("ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT").show(10)
