@@ -6,12 +6,22 @@ import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, Loca
 
 object Application {
   def main(args: Array[String]): Unit = {
+    //Input parameters
+    var inputTopic = " " // Topic read from kafka
+    var nHits = 128      // Hits contained per message
+    var windowTime = 5   // Batch time in seconds
 
-    val windowTime = args(0).toInt
-
-    val nHits = 128 //number of hits per message
-    val topicIn = Array("test80")
-    val topicOut = Array("events")
+    try {
+      inputTopic = args(0)
+      nHits = args(1).toInt
+      windowTime = args(2).toInt
+    } catch {
+      case e: Exception => {
+        println("Wrong number of parameters")
+        println("Input should be in the form <input topic> <numberOfHits> <batch-time (s)> ")
+        System.exit(1)
+      }
+    }
 
     val consumerConfig = Map[String, Object](
       "bootstrap.servers" -> "10.64.22.40:9092,10.64.22.41:9092,10.64.22.42:9092",
@@ -30,12 +40,15 @@ object Application {
       ssc,
       LocationStrategies.PreferConsistent,
       ConsumerStrategies.Subscribe[Array[Byte], Array[Byte]](
-        topicIn,
+        Array(inputTopic),
         consumerConfig
       )
     ).map(x => x.value())
 
     stream.foreachRDD(rdd => {
+
+      // Measure batch processing time
+      val startTimer = System.currentTimeMillis()
 
       if(!rdd.isEmpty()){
 
@@ -64,17 +77,17 @@ object Application {
 
         val NCHANNELS = 64
         val XCELL = 42.0
-        val ZCELL = 13.
+        val ZCELL = 13.0
         val TDRIFT = 15.6*25.0
         val VDRIFT = XCELL*0.5 / TDRIFT
 
         val events = hits.withColumn("X_POSSHIFT",
-          when($"TDC_CHANNEL" % 4 === 1, 0)
-            .when($"TDC_CHANNEL" % 4 === 2, 0)
-            .when($"TDC_CHANNEL" % 4 === 3, 0.5)
-            .when($"TDC_CHANNEL" % 4 === 0, 0.5)
-            .otherwise(0.0)
-        )
+            when($"TDC_CHANNEL" % 4 === 1, 0)
+              .when($"TDC_CHANNEL" % 4 === 2, 0)
+              .when($"TDC_CHANNEL" % 4 === 3, 0.5)
+              .when($"TDC_CHANNEL" % 4 === 0, 0.5)
+              .otherwise(0.0)
+          )
           .withColumn("SL",
             when(($"FPGA" === 0) && ($"TDC_CHANNEL" <= NCHANNELS) , 0)
               .when(($"FPGA" === 0) && ($"TDC_CHANNEL" > NCHANNELS) && ($"TDC_CHANNEL" <= 2*NCHANNELS), 1)
@@ -89,21 +102,21 @@ object Application {
           .withColumn("X_POS_RIGHT", ((($"TDC_CHANNEL_NORM"-0.5)/4).cast("integer") +
             $"X_POSSHIFT")*XCELL + XCELL/2 + greatest($"TDRIFT", lit(0))*VDRIFT
           )
-            .withColumn("Z_POS",
-              when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
-                .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
-                .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
-                .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
-                .otherwise(0.0)
-            )
+          .withColumn("Z_POS",
+             when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
+               .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
+               .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
+               .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
+               .otherwise(0.0)
+          )
 
         // show events
-        events.select("ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT").show(10)
+        events.select("ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT").show(10)
 
         // to do: create json with columns and write to kafka
-
       }
 
+      println("Processing Time: %.1f s\n".format((System.currentTimeMillis()-startTimer).toFloat/1000))
     })
 
     // Start the computation
