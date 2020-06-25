@@ -1,2 +1,5 @@
 python/* linguist-vendored
 *.ipynb linguist-language=Python
+.idea/* linguist-vendored
+project/* linguist-vendored
+target/* linguist-vendored

@@ -1,20 +1,24 @@
 import java.nio.{ByteBuffer, ByteOrder}
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.functions.{udf, col, lit, explode}
+import org.apache.spark.sql.functions.{udf,lit,explode,col}
 
 object Unpacker {
-
-  def unpack(df: DataFrame, nwords:Int)= {
-
+  
+  def unpack(df: DataFrame, nwords: Int) = {
+    // Convert message (nhits + runID) binaries
     val convertUDF = udf((record: Array[Byte], nwords: Int) => {
-
       val bb = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN)
       val hits = ArrayBuffer[Array[Long]]()
 
-      for (_ <- 1 to nwords){
+      // get first word containing run id
+      val hit = bb.getLong
+      // check head
+      if (((hit >> 62) & 0x3) != 0) println("Error! head != 0")
+      // get run id
+      val runID = hit & 0xFFFFFFFF
 
+      for (_ <- 1 to nwords){
         val hit = bb.getLong
         val HEAD = (hit >> 62) & 0x3
 
@@ -27,24 +31,24 @@ object Unpacker {
           hits.append(triggerUnpacker(hit))
         }
       }
-      // return array of hits
-      hits
+      // return array of hits + runID
+      hits.map(hit => runID +: hit)
     })
 
     val unpackedDF: DataFrame = df.withColumn("converted", convertUDF(df("records"), lit(nwords)))
       .withColumn("converted", explode(col("converted")))
       .select(
-        col("converted")(0).as("HEAD"),
-        col("converted")(1).as("FPGA"),
-        col("converted")(2).as("TDC_CHANNEL"),
-        col("converted")(3).as("ORBIT_CNT"),
-        col("converted")(4).as("BX_COUNTER"),
-        col("converted")(5).as("TDC_MEAS"),
-        col("converted")(6).as("TRIG_QUAL")
+        col("converted")(0).as("RUN_ID"),
+        col("converted")(1).as("HEAD"),
+        col("converted")(2).as("FPGA"),
+        col("converted")(3).as("TDC_CHANNEL"),
+        col("converted")(4).as("ORBIT_CNT"),
+        col("converted")(5).as("BX_COUNTER"),
+        col("converted")(6).as("TDC_MEAS"),
+        col("converted")(7).as("TRIG_QUAL")
       )
 
     unpackedDF
-
   }
 
   def hitUnpacker(hit: Long): Array[Long] = {

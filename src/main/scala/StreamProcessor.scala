@@ -1,33 +1,44 @@
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions.{greatest, lit, min, when}
-import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
+import org.apache.spark.streaming.{Seconds, StreamingContext}
 
-object Application {
+object StreamProcessor {
   def main(args: Array[String]): Unit = {
-    //Input parameters
-    var inputTopic = " " // Topic read from kafka
-    var nHits = 128      // Hits contained per message
-    var windowTime = 5   // Batch time in seconds
+    // Input parameters
+    // Usage: --par_name value
+    var inputTopic = "" // Kafka topic
+    var kafkaBrokers = " " // Address of brokers
+    var nHits = 128 // Number of hits per message
+    var windowTime = 5 // Window seconds
 
-    try {
-      inputTopic = args(0)
-      nHits = args(1).toInt
-      windowTime = args(2).toInt
-    } catch {
-      case e: Exception => {
-        println("Wrong number of parameters")
-        println("Input should be in the form <input topic> <numberOfHits> <batch-time (s)> ")
-        System.exit(1)
+    // Parse parameters
+    args.sliding(2, 2).toList.foreach{
+      case Array("--brokers", brokersIP: String) => {
+        kafkaBrokers = brokersIP
+        println(s"Brokers: $kafkaBrokers")
       }
+      case Array("--input-topic", topic: String) => {
+        inputTopic = topic
+        println(s"Input topic: $inputTopic")
+      }
+      case Array("--num-hits", hits: String) => {
+        nHits = hits.toInt
+        println(s"Hits per message: $nHits")
+      }
+      case Array("--window", window: String) => {
+        windowTime = window.toInt
+        println(s"Window time: $windowTime")
+      }
+      case _ => println("Invalid argument")
     }
 
     val consumerConfig = Map[String, Object](
-      "bootstrap.servers" -> "10.64.22.40:9092,10.64.22.41:9092,10.64.22.42:9092",
+      "bootstrap.servers" -> kafkaBrokers,
       "key.deserializer" -> "org.apache.kafka.common.serialization.ByteArrayDeserializer",
       "value.deserializer" -> "org.apache.kafka.common.serialization.ByteArrayDeserializer",
-      "group.id" -> "40"
+      "group.id" -> "42"
     )
 
     // Create streaming context
@@ -50,10 +61,10 @@ object Application {
       // Measure batch processing time
       val startTimer = System.currentTimeMillis()
 
-      if(!rdd.isEmpty()){
+      if(!rdd.partitions.isEmpty){
 
         // Get the singleton instance of SparkSession
-        val spark = SparkSession.builder.config(rdd.sparkContext.getConf).getOrCreate()
+        val spark = SparkSessionSingleton.getInstance(rdd.sparkContext.getConf)
         import spark.implicits._
 
         // create df
@@ -63,7 +74,7 @@ object Application {
         val unpackedDataframe = Unpacker.unpack(df, nHits)
           .where($"TDC_CHANNEL"=!=139)
 
-        val allhits = unpackedDataframe.filter("HEAD == 1").drop("TRG_QUALITY")
+        val allhits = unpackedDataframe.filter("HEAD <= 2").drop("TRG_QUALITY")
         val triggershits = unpackedDataframe.filter("HEAD > 2")
 
         val triggers = triggershits
@@ -82,12 +93,12 @@ object Application {
         val VDRIFT = XCELL*0.5 / TDRIFT
 
         val events = hits.withColumn("X_POSSHIFT",
-            when($"TDC_CHANNEL" % 4 === 1, 0)
-              .when($"TDC_CHANNEL" % 4 === 2, 0)
-              .when($"TDC_CHANNEL" % 4 === 3, 0.5)
-              .when($"TDC_CHANNEL" % 4 === 0, 0.5)
-              .otherwise(0.0)
-          )
+          when($"TDC_CHANNEL" % 4 === 1, 0)
+            .when($"TDC_CHANNEL" % 4 === 2, 0)
+            .when($"TDC_CHANNEL" % 4 === 3, 0.5)
+            .when($"TDC_CHANNEL" % 4 === 0, 0.5)
+            .otherwise(0.0)
+        )
           .withColumn("SL",
             when(($"FPGA" === 0) && ($"TDC_CHANNEL" <= NCHANNELS) , 0)
               .when(($"FPGA" === 0) && ($"TDC_CHANNEL" > NCHANNELS) && ($"TDC_CHANNEL" <= 2*NCHANNELS), 1)
@@ -103,17 +114,17 @@ object Application {
             $"X_POSSHIFT")*XCELL + XCELL/2 + greatest($"TDRIFT", lit(0))*VDRIFT
           )
           .withColumn("Z_POS",
-             when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
-               .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
-               .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
-               .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
-               .otherwise(0.0)
+            when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
+              .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
+              .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
+              .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
+              .otherwise(0.0)
           )
 
         // show events
-        events.select("ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT").show(10)
+        events.select("RUN_ID", "ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT").show(10)
 
-        // to do: create json with columns and write to kafka
+        // to do: write somewhere
       }
 
       println("Processing Time: %.1f s\n".format((System.currentTimeMillis()-startTimer).toFloat/1000))
@@ -124,5 +135,20 @@ object Application {
     ssc.awaitTermination()
 
   }
+}
 
+/** Lazily instantiated singleton instance of SparkSession */
+object SparkSessionSingleton {
+
+  @transient  private var instance: SparkSession = _
+
+  def getInstance(sparkConf: SparkConf): SparkSession = {
+    if (instance == null) {
+      instance = SparkSession
+        .builder
+        .config(sparkConf)
+        .getOrCreate()
+    }
+    instance
+  }
 }
