@@ -94,14 +94,7 @@ object StructuredStreaming {
         val TDRIFT = 15.6*25.0
         val VDRIFT = XCELL*0.5 / TDRIFT
 
-        val eventBuilder = hits.withColumn("X_POSSHIFT",
-          when($"TDC_CHANNEL" % 4 === 1, 0)
-            .when($"TDC_CHANNEL" % 4 === 2, 0)
-            .when($"TDC_CHANNEL" % 4 === 3, 0.5)
-            .when($"TDC_CHANNEL" % 4 === 0, 0.5)
-            .otherwise(0.0)
-        )
-          .withColumn("SL",
+        val eventBuilder = hits.withColumn("SL",
             when(($"FPGA" === 0) && ($"TDC_CHANNEL" <= NCHANNELS) , 0)
               .when(($"FPGA" === 0) && ($"TDC_CHANNEL" > NCHANNELS) && ($"TDC_CHANNEL" <= 2*NCHANNELS), 1)
               .when(($"FPGA" === 1) && ($"TDC_CHANNEL" <= NCHANNELS) , 2)
@@ -109,19 +102,31 @@ object StructuredStreaming {
               .otherwise(-1)
           )
           .withColumn("TDC_CHANNEL_NORM", $"TDC_CHANNEL" - lit(NCHANNELS)*($"SL"%2))
-          .withColumn("X_POS_LEFT", ((($"TDC_CHANNEL_NORM"-0.5)/4).cast("integer") +
-            $"X_POSSHIFT")*XCELL + XCELL/2 - greatest($"TDRIFT", lit(0))*VDRIFT
-          )
-          .withColumn("X_POS_RIGHT", ((($"TDC_CHANNEL_NORM"-0.5)/4).cast("integer") +
-            $"X_POSSHIFT")*XCELL + XCELL/2 + greatest($"TDRIFT", lit(0))*VDRIFT
-          )
-          .withColumn("Z_POS",
-            when($"TDC_CHANNEL" % 4 === 1, ZCELL*3.5)
-              .when($"TDC_CHANNEL" % 4 === 2, ZCELL*1.5)
-              .when($"TDC_CHANNEL" % 4 === 3, ZCELL*2.5)
-              .when($"TDC_CHANNEL" % 4 === 0, ZCELL*0.5)
+          .withColumn("LAYER",
+            when($"TDC_CHANNEL_NORM" % 4 === 1, 1)
+              .when($"TDC_CHANNEL_NORM" % 4 === 2, 3)
+              .when($"TDC_CHANNEL_NORM" % 4 === 3, 2)
+              .when($"TDC_CHANNEL_NORM" % 4 === 0, 4)
               .otherwise(0.0)
           )
+          .withColumn("Z_POS",
+            when($"TDC_CHANNEL_NORM" % 4 === 1, 1.5*ZCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 2, -0.5*ZCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 3, 0.5*ZCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 0, -1.5*ZCELL)
+              .otherwise(0.0)
+          )
+          .withColumn("X_POSSHIFT",
+            when($"TDC_CHANNEL_NORM" % 4 === 1, -7.5*XCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 2, -7.5*XCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 3, -7.0*XCELL)
+              .when($"TDC_CHANNEL_NORM" % 4 === 0, -7.0*XCELL)
+              .otherwise(0.0)
+          )
+          .withColumn("WIRE_NUM", ((($"TDC_CHANNEL_NORM"-1)/4).cast("integer") + 1)
+          .withColumn("WIRE_POS", ($"WIRE_NUM"-1)*XCELL + $"X_POSSHIFT"))
+          .withColumn("X_POS_LEFT", $"WIRE_POS" - greatest($"TDRIFT", lit(0))*VDRIFT)
+          .withColumn("X_POS_RIGHT", $"WIRE_POS" + greatest($"TDRIFT", lit(0))*VDRIFT)
 
         // Dataframe with events list
         val events = eventBuilder.select("RUN_ID", "ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT")
