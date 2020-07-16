@@ -85,6 +85,7 @@ object StructuredStreaming {
 
         val hits = allhits.join(triggers_table, "ORBIT_CNT")
           .withColumn("TDRIFT", ($"BX_COUNTER"-$"T0")*25 + $"TDC_MEAS"*25/30)
+          .withColumn("BX_TRIG", $"T0")
           .drop("T0")
           .where(($"TDRIFT"> -50) && ($"TDRIFT"<500))
 
@@ -129,7 +130,7 @@ object StructuredStreaming {
           .withColumn("X_POS_RIGHT", $"WIRE_POS" + greatest($"TDRIFT", lit(0))*VDRIFT)
 
         // Dataframe with events list
-        val events = eventBuilder.select("RUN_ID", "ORBIT_CNT", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT")
+        val events = eventBuilder.select("RUN_ID", "ORBIT_CNT", "BX_TRIG", "SL", "LAYER", "WIRE_NUM", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT")
 
         // Aggregate by orbit
         val groupedEvents = events.groupBy("ORBIT_CNT", "run_id")
