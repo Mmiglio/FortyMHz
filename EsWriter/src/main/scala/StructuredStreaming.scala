@@ -133,13 +133,13 @@ object StructuredStreaming {
         val events = eventBuilder.select("RUN_ID", "ORBIT_CNT", "BX_TRIG", "SL", "LAYER", "WIRE_NUM", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT")
 
         // Aggregate by orbit
-        val groupedEvents = events.groupBy("ORBIT_CNT", "run_id")
-          .agg(collect_list(struct($"X_POS_LEFT", $"X_POS_RIGHT", $"Z_POS", $"TDRIFT")).as("HITS_LIST")) //struct(events.columns.head, events.columns.tail: _*)
+        val groupedEvents = events.groupBy("ORBIT_CNT", "BX_TRIG", "run_id")
+          .agg(collect_list(struct($"SL", $"LAYER", $"WIRE_NUM", $"X_POS_LEFT", $"X_POS_RIGHT", $"Z_POS", $"TDRIFT")).as("HITS_LIST")) //struct(events.columns.head, events.columns.tail: _*)
           .withColumn("NHITS", size($"HITS_LIST"))
 
         groupedEvents
           .withColumn("TIME_STAMP", lit(System.currentTimeMillis))
-          .select("RUN_ID", "TIME_STAMP", "ORBIT_CNT", "NHITS", "HITS_LIST")
+          .select("RUN_ID", "TIME_STAMP", "ORBIT_CNT", "BX_TRIG", "NHITS", "HITS_LIST")
           .saveToEs("run-{RUN_ID}")
 
         //println("Processing Time: %.1f s\n".format((System.currentTimeMillis()-startTimer).toFloat/1000))
