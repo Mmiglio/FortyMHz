@@ -1,6 +1,6 @@
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.streaming.{StreamingQuery, StreamingQueryListener, Trigger}
-import org.apache.spark.sql.functions.{collect_list, greatest, lit, min, size, struct, when}
+import org.apache.spark.sql.functions.{collect_list, greatest, lit, min, size, struct, when, lpad}
 import org.apache.spark.storage.StorageLevel
 import org.elasticsearch.spark.sql._
 
@@ -124,23 +124,34 @@ object StructuredStreaming {
               .when($"TDC_CHANNEL_NORM" % 4 === 0, -7.0*XCELL)
               .otherwise(0.0)
           )
-          .withColumn("WIRE_NUM", ((($"TDC_CHANNEL_NORM"-1)/4).cast("integer") + 1)
-          .withColumn("WIRE_POS", ($"WIRE_NUM"-1)*XCELL + $"X_POSSHIFT"))
+          .withColumn("WIRE_NUM", (($"TDC_CHANNEL_NORM"-1)/4).cast("integer") + 1)
+          .withColumn("WIRE_POS", ($"WIRE_NUM"-1)*XCELL + $"X_POSSHIFT")
           .withColumn("X_POS_LEFT", $"WIRE_POS" - greatest($"TDRIFT", lit(0))*VDRIFT)
           .withColumn("X_POS_RIGHT", $"WIRE_POS" + greatest($"TDRIFT", lit(0))*VDRIFT)
 
         // Dataframe with events list
-        val events = eventBuilder.select("RUN_ID", "ORBIT_CNT", "BX_TRIG", "SL", "LAYER", "WIRE_NUM", "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT")
+        val events = eventBuilder
+          .select(
+          "RUN_ID", "ORBIT_CNT",
+          "BX_TRIG", "SL", "LAYER", "WIRE_NUM",
+          "X_POS_LEFT", "X_POS_RIGHT", "Z_POS", "TDRIFT"
+        )
 
         // Aggregate by orbit
         val groupedEvents = events.groupBy("ORBIT_CNT", "BX_TRIG", "run_id")
-          .agg(collect_list(struct($"SL", $"LAYER", $"WIRE_NUM", $"X_POS_LEFT", $"X_POS_RIGHT", $"Z_POS", $"TDRIFT")).as("HITS_LIST")) //struct(events.columns.head, events.columns.tail: _*)
+          .agg(
+            collect_list(struct($"SL", $"LAYER", $"WIRE_NUM", $"X_POS_LEFT", $"X_POS_RIGHT", $"Z_POS", $"TDRIFT"))
+            .as("HITS_LIST")
+          ) //struct(events.columns.head, events.columns.tail: _*)
           .withColumn("NHITS", size($"HITS_LIST"))
 
+        // Add timestamp and pad run number
         groupedEvents
           .withColumn("TIME_STAMP", lit(System.currentTimeMillis))
+          .withColumn("RUN_PADDED", lpad($"RUN_ID", 6, "0"))
+          .drop("RUN_ID").withColumnRenamed("RUN_PADDED", "RUN_ID")
           .select("RUN_ID", "TIME_STAMP", "ORBIT_CNT", "BX_TRIG", "NHITS", "HITS_LIST")
-          .saveToEs("run-{RUN_ID}")
+          .saveToEs("run{RUN_ID}")
 
         //println("Processing Time: %.1f s\n".format((System.currentTimeMillis()-startTimer).toFloat/1000))
 
