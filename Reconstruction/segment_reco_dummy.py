@@ -47,7 +47,7 @@ def segment_reconstructor(chamberhits):
     segment, _ = fit(x, combinatorial)
     return segment, _
 
-def segments_reconstructor(hits_list):
+def segments_reconstructor(hits_list, run_id):
     hits = pd.DataFrame(hits_list)
     # input is a list of hits
     segments = {}
@@ -55,4 +55,4 @@ def segments_reconstructor(hits_list):
         chamberhits = hits[(hits.SL==chamber)]
         segments[chamber], _ = segment_reconstructor(chamberhits)
 
-    return segments
+    return {'segments': segments, 'run_id': run_id}

@@ -1,7 +1,8 @@
 from elasticsearch import Elasticsearch
+from elasticsearch import helpers
 import dask
 
-class Reader(object):
+class Dalek(object):
     def __init__(self, num_workers, el_hosts):
         self.el_hosts = el_hosts
         self.num_workers = num_workers
@@ -32,4 +33,13 @@ class Reader(object):
         
         # return list of futures
         return futures
-    
+
+    def write(self, bag, doc_generator):
+        writing_res = bag.map_partitions(self.partition_writer, doc_generator=doc_generator)
+        return writing_res
+
+    def partition_writer(self, partition, doc_generator):
+        elastic_client = Elasticsearch(self.el_hosts)
+        res = helpers.bulk(elastic_client, doc_generator(partition))
+        return ['Inserted.' for _ in range(res[0])]
+            

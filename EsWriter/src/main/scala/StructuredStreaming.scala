@@ -12,6 +12,8 @@ object StructuredStreaming {
     var kafkaBrokers = " " // Address of brokers
     var nHits = 128 // Number of hits per message
     var windowTime = 1000 // Window milliseconds
+    var writeToElastic = true // write results to elastic index
+    var occupancy = false // Save occupancy informations to elastic
 
     // Parse parameters
     args.sliding(2, 2).toList.foreach{
@@ -30,6 +32,14 @@ object StructuredStreaming {
       case Array("--window", window: String) => {
         windowTime = window.toInt
         println(s"Window time: $windowTime")
+      }
+      case Array("--occupancy", occ: String) => {
+        occupancy = occ.toBoolean
+        println(s"Save occupancy informations? $occupancy")
+      }
+      case Array("--writeToElastic", w2el: String) => {
+        writeToElastic = w2el.toBoolean
+        println(s"Write events to elastic? $writeToElastic")
       }
       case _ => println("Invalid argument")
     }
@@ -161,23 +171,31 @@ object StructuredStreaming {
           .withColumn("NHITS", size($"HITS_LIST"))
 
         // Add timestamp and pad run number
-        groupedEvents
+        val res = groupedEvents
           .withColumn("TIME_STAMP", lit(System.currentTimeMillis))
           .withColumn("RUN_PADDED", lpad($"RUN_ID", 6, "0"))
           .drop("RUN_ID").withColumnRenamed("RUN_PADDED", "RUN_ID")
           .select("RUN_ID", "TIME_STAMP", "ORBIT_CNT", "BX_TRIG", "NHITS", "HITS_LIST")
-          .saveToEs("run{RUN_ID}")
 
+        if(writeToElastic){
+          res.saveToEs("run{RUN_ID}")
+        }
+        else {
+          res.show(10)
+          //println(res.count())
+        }
         //println("Processing Time: %.1f s\n".format((System.currentTimeMillis()-startTimer).toFloat/1000))
 
         // Get chambers occupancy
-        val occupancyDF = allhits
+        if(occupancy) {
+          val occupancyDF = allhits
             .groupBy("run_id", "SL", "LAYER", "WIRE_NUM")
             .count()
             .withColumn("TIME_STAMP", lit(System.currentTimeMillis))
             .withColumn("RUN_PADDED", lpad($"RUN_ID", 6, "0"))
             .drop("RUN_ID").withColumnRenamed("RUN_PADDED", "RUN_ID")
             .saveToEs("occupancy{RUN_ID}")
+        }
 
         cachedBatchDF.unpersist()
       })
