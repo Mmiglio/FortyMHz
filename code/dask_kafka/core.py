@@ -74,7 +74,7 @@ class KafkaReader(object):
 
     def close_consumers(self):
         """
-        TODO: doc
+        TODO: describe func
         """        
         res = self.client.run(_close_consumers)
         for r in res:

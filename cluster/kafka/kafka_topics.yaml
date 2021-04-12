@@ -1,0 +1,29 @@
+apiVersion: kafka.strimzi.io/v1beta1
+kind: KafkaTopic
+metadata:
+  name: topic4
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 4
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: topic8
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 8
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: topic4-real
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 4
+  replicas: 1
